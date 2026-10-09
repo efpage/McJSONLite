@@ -5,6 +5,8 @@ It is a fork in the spirit of [McJSON](https://github.com/hydrobyte/McJSON),
 largely compatible in use, but **without exceptions on read access**. This is a huge 
 improvement, as it makes tons of typechecks unnecessary.
 
+Tested with Delphi 12.3
+
 While most of the code is plug-in compatible, some names have been changed:
 - TMcJson -> TJSon
 - TJValueType -> Kind

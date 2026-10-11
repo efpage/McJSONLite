@@ -1,8 +1,11 @@
 (* ******************************************************************************
   McJsonLite - small, JS-like, "never nil" JSON tree for Delphi / FPC.
 
+  V0.2: 11.20.2026 extended Error handling for JSON parser: delivers row and column of text
+
   Derived in design from McJSON (c) 2021-2025 HydroByte Software, MIT License
-  https://github.com/hydrobyte/McJSON
+  https://github.com/hydrobyte/McJSON, New concept and updates by Eckehard
+  https://github.com/efpage/McJSONLite
   Property names (Items, Values, AsString, AsInteger, AsNumber, AsBoolean,
   AsJSON, Key, Count, Add, Delete, ToString, LoadFromFile, SaveToFile) were
   kept compatible where possible.
@@ -55,7 +58,7 @@ type
     FKind: TJKind;
     FKey: string;
     FValue: string;
-    FStrings: TStringList; // Cache für AsStrings (Lesen)
+    FStrings: TStringList; // Cache fÃ¼r AsStrings (Lesen)
     FChild: TList; // real children (object/array)
     FGhosts: TList; // ghost nodes created from this node
     FParent: TJson; // <> nil only for ghosts
@@ -143,9 +146,9 @@ type
     // key present (null counts), creates nothing
     function Add: TJson; overload; // wie bisher: leeres Element
     function Add(const AValue: string): TJson; overload;
-    // String anhängen, liefert das neue Element
+    // String anhÃ¤ngen, liefert das neue Element
     function Add(AList: TStrings): TJson; overload;
-    // alle Strings anhängen, liefert Self    function  Delete(const AKey: string): Boolean; overload;
+    // alle Strings anhÃ¤ngen, liefert Self    function  Delete(const AKey: string): Boolean; overload;
     function Delete(const AKey: string): Boolean; overload;
     function Delete(AIndex: Integer): Boolean; overload;
     procedure Clear;
@@ -172,9 +175,20 @@ var
   { helpers }
   { ---------------------------------------------------------------------------- }
 
-procedure ParseError(const AMsg: string; APos: Integer);
+procedure ParseError(const S, AMsg: string; APos: Integer);
+var
+  i, Line, LineStart: Integer;
 begin
-  raise EJsonError.CreateFmt('JSON error: %s at position %d', [AMsg, APos]);
+  Line := 1;
+  LineStart := 1;
+  for i := 1 to Min(APos - 1, Length(S)) do
+    if S[i] = #10 then
+    begin
+      Inc(Line);
+      LineStart := i + 1;
+    end;
+  raise EJsonError.CreateFmt('JSON error: %s (line %d, column %d)',
+                             [AMsg, Line, APos - LineStart + 1]);
 end;
 
 function IsDigit(c: Char): Boolean;
@@ -283,7 +297,7 @@ begin
   while True do
   begin
     if P > L then
-      ParseError('unterminated string', P);
+      ParseError(S, 'unterminated string', P);
     c := S[P];
     if c = Q then
       Break
@@ -292,7 +306,7 @@ begin
       BufAdd(B, N, Copy(S, St, P - St));
       Inc(P);
       if P > L then
-        ParseError('unterminated string', P);
+        ParseError(s, 'unterminated string', P);
       case S[P] of
         'b':
           BufAdd(B, N, #8);
@@ -309,13 +323,13 @@ begin
         'u':
           begin
             if P + 4 > L then
-              ParseError('bad \u escape', P);
+              ParseError(S, 'bad \u escape', P);
             Code := 0;
             for k := 1 to 4 do
             begin
               h := HexVal(S[P + k]);
               if h < 0 then
-                ParseError('bad \u escape', P);
+                ParseError(S, 'bad \u escape', P);
               Code := Code * 16 + h;
             end;
             Inc(P, 4);
@@ -332,7 +346,7 @@ begin
               begin
                 h := HexVal(S[P + k]);
                 if h < 0 then
-                  ParseError('bad \u escape', P);
+                  ParseError(S, 'bad \u escape', P);
                 Code2 := Code2 * 16 + h;
               end;
               if (Code2 >= $DC00) and (Code2 <= $DFFF) then
@@ -349,13 +363,13 @@ begin
 {$ENDIF}
           end;
       else
-        ParseError('invalid escape', P);
+        ParseError(S, 'invalid escape', P);
       end;
       Inc(P);
       St := P;
     end
     else if c < ' ' then
-      ParseError('control character in string', P)
+      ParseError(S, 'control character in string', P)
     else
       Inc(P);
   end;
@@ -374,7 +388,7 @@ begin
   if S[P] = '-' then
     Inc(P);
   if (P > L) or not IsDigit(S[P]) then
-    ParseError('invalid number', P);
+    ParseError(S, 'invalid number', P);
   if S[P] = '0' then
     Inc(P)
   else
@@ -384,7 +398,7 @@ begin
   begin
     Inc(P);
     if (P > L) or not IsDigit(S[P]) then
-      ParseError('invalid number', P);
+      ParseError(S, 'invalid number', P);
     while (P <= L) and IsDigit(S[P]) do
       Inc(P);
   end;
@@ -394,7 +408,7 @@ begin
     if (P <= L) and ((S[P] = '+') or (S[P] = '-')) then
       Inc(P);
     if (P > L) or not IsDigit(S[P]) then
-      ParseError('invalid number', P);
+      ParseError(S, 'invalid number', P);
     while (P <= L) and IsDigit(S[P]) do
       Inc(P);
   end;
@@ -410,7 +424,7 @@ begin
   while (P <= L) and IsIdentChar(S[P]) do
     Inc(P);
   if P = St then
-    ParseError('unexpected character', P);
+    ParseError(S, 'unexpected character', P);
   Id := Copy(S, St, P - St);
 end;
 
@@ -924,7 +938,7 @@ end;
 
 function TJson.Add(const AValue: string): TJson;
 begin
-  Result := Add; // ruft deine Original-Add auf (Obtain, Typprüfung, NewChild)
+  Result := Add; // ruft deine Original-Add auf (Obtain, TypprÃ¼fung, NewChild)
   Result.AsString := AValue;
 end;
 
@@ -996,7 +1010,7 @@ begin
     Seg := Copy(APath, P, Q - P);
     P := Q + Length(ASep);
     if Seg = '' then
-      Continue; // führende, doppelte, abschließende Trenner ignorieren
+      Continue; // fÃ¼hrende, doppelte, abschlieÃŸende Trenner ignorieren
     R := Result.Resolve;
     if (R <> nil) and (R.FKind = jkArray) and TryStrToInt(Seg, Idx) then
       Result := Result.GetByIdx(Idx) // Zahl auf einem Array: Index
@@ -1015,7 +1029,7 @@ var
 begin
   SkipWS(S, P);
   if P > Length(S) then
-    ParseError('unexpected end of text', P);
+    ParseError(S, 'unexpected end of text', P);
   case S[P] of
     '{':
       ParseObject(S, P);
@@ -1055,7 +1069,7 @@ begin
       FValue := '';
     end
     else
-      ParseError('unexpected token "' + Str + '"', P - Length(Str));
+      ParseError(S, 'unexpected token "' + Str + '"', P - Length(Str));
   end;
 end;
 
@@ -1070,7 +1084,7 @@ begin
   begin
     SkipWS(S, P);
     if P > Length(S) then
-      ParseError('unterminated object', P);
+      ParseError(S, 'unterminated object', P);
     if S[P] = '}' then
     begin
       Inc(P);
@@ -1082,17 +1096,17 @@ begin
       ParseIdent(S, P, Key); // JS-style unquoted key
     SkipWS(S, P);
     if (P > Length(S)) or (S[P] <> ':') then
-      ParseError('expected ":"', P);
+      ParseError(S, 'expected ":"', P);
     Inc(P);
     c := NewChild(Key);
     c.ParseValue(S, P);
     SkipWS(S, P);
     if P > Length(S) then
-      ParseError('unterminated object', P);
+      ParseError(S, 'unterminated object', P);
     if S[P] = ',' then
       Inc(P)
     else if S[P] <> '}' then
-      ParseError('expected "," or "}"', P);
+      ParseError(S, 'expected "," or "}"', P);
   end;
 end;
 
@@ -1106,7 +1120,7 @@ begin
   begin
     SkipWS(S, P);
     if P > Length(S) then
-      ParseError('unterminated array', P);
+      ParseError(S, 'unterminated array', P);
     if S[P] = ']' then
     begin
       Inc(P);
@@ -1116,11 +1130,11 @@ begin
     c.ParseValue(S, P);
     SkipWS(S, P);
     if P > Length(S) then
-      ParseError('unterminated array', P);
+      ParseError(S, 'unterminated array', P);
     if S[P] = ',' then
       Inc(P)
     else if S[P] <> ']' then
-      ParseError('expected "," or "]"', P);
+      ParseError(S, 'expected "," or "]"', P);
   end;
 end;
 
@@ -1136,7 +1150,7 @@ begin
     Tmp.ParseValue(AValue, P);
     SkipWS(AValue, P);
     if P <= Length(AValue) then
-      ParseError('unexpected trailing characters', P);
+      ParseError(aValue, 'unexpected trailing characters', P);
     Obtain.TakeFrom(Tmp);
   finally
     Tmp.Free;
